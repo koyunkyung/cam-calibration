@@ -29,7 +29,6 @@ class OpenCVCalibration:
         print(f"k1={dist[0,0]:.6f}, k2={dist[0,1]:.6f}, p1={dist[0,2]:.6f}, p2={dist[0,3]:.6f}, k3={dist[0,4]:.6f}")
         
         return {
-            'rms_error': ret,
             'camera_matrix': mtx,
             'dist_coeffs': dist,
             'rvecs': rvecs,
@@ -53,9 +52,8 @@ class OpenCVCalibration:
             errors.append(error)
             print(f"Image {i+1:2d}: {error:.4f} pixels")
         
-        print(f"\nMean error: {np.mean(errors):.4f} pixels")
-        print(f"Max error:  {np.max(errors):.4f} pixels")
-        print(f"Min error:  {np.min(errors):.4f} pixels")
+        print(f"\nMean: {np.mean(errors):.6f} px | Std: {np.std(errors):.6f} px")
+        print(f"Min:  {np.min(errors):.6f} px | Max: {np.max(errors):.6f} px")
         
         return errors
     
@@ -73,25 +71,31 @@ class OpenCVCalibration:
                 result['dist_coeffs']
             )
             
-            # original detected points (red)
+            error = cv2.norm(self.image_points[i], imgpoints2, cv2.NORM_L2) / len(imgpoints2)
+        
+            # detected corners (red)
             for point in self.image_points[i]:
                 cv2.circle(img, tuple(point.ravel().astype(int)), 5, (0, 0, 255), -1)
             # reprojected points (green)
             for point in imgpoints2:
                 cv2.circle(img, tuple(point.ravel().astype(int)), 3, (0, 255, 0), -1)
 
-            # add legend
-            cv2.putText(img, "Red: Detected", (10, 30), 
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
-            cv2.putText(img, "Green: OpenCV Reprojected", (10, 60), 
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+            cv2.rectangle(img, (5, 5), (550, 140), (0, 0, 0), -1)
+            
+            # legend
+            cv2.putText(img, "Red: Detected", (15, 45), 
+                   cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 0, 255), 3)
+            cv2.putText(img, "Green: Reprojected", (15, 90), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 255, 0), 3)
+            cv2.putText(img, f"Error: {error:.4f} px", (15, 130),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1.2, (255, 255, 255), 3)
             
             save_path = os.path.join(output_dir, f"reproj_{i+1:03d}.jpg")
             cv2.imwrite(save_path, img)
         
         print(f"Saved {len(self.images)} reprojection images")
     
-    def undistort_images(self, result, output_dir="data/undistorted/opencv"):
+    def undistort_images(self, result, output_dir="results/undistorted/opencv"):
         os.makedirs(output_dir, exist_ok=True)
         
         print(f"\n=== Saving Undistorted Images to {output_dir}/ ===")
@@ -106,7 +110,6 @@ class OpenCVCalibration:
         )
         
         for i, img in enumerate(self.images):
-            # undistort
             dst = cv2.undistort(
                 img,
                 result['camera_matrix'],
@@ -115,8 +118,17 @@ class OpenCVCalibration:
                 newcameramtx
             )
             comparison = np.hstack([img, dst])
+            # add labels
+            h, w = img.shape[:2]
+            cv2.rectangle(comparison, (5, 5), (450, 70), (0, 0, 0), -1)
+            cv2.rectangle(comparison, (w + 5, 5), (w + 350, 70), (0, 0, 0), -1)
             
-            save_path = os.path.join(output_dir, f"undist_{i:03d}.jpg")
+            cv2.putText(comparison, "Original (Distorted)", (15, 50),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1.2, (255, 255, 255), 3)
+            cv2.putText(comparison, "Undistorted", (w + 15, 50),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1.2, (255, 255, 255), 3)
+            
+            save_path = os.path.join(output_dir, f"undist_{i+1:03d}.jpg")
             cv2.imwrite(save_path, comparison)
         
         print(f"Saved {len(self.images)} undistorted images")
@@ -125,6 +137,12 @@ class OpenCVCalibration:
         os.makedirs(os.path.dirname(filename), exist_ok=True)
         import json
         
+        # convert rotation vectors to matrices for readability
+        rotation_matrices = []
+        for rvec in result['rvecs']:
+            rmat, _ = cv2.Rodrigues(rvec)
+            rotation_matrices.append(rmat.tolist())
+        
         results_dict = {
             'method': 'OpenCV cv2.calibrateCamera',
             'num_images': len(self.images),
@@ -132,34 +150,42 @@ class OpenCVCalibration:
                 'width': self.image_size[0],
                 'height': self.image_size[1]
             },
-            'rms_error': float(result['rms_error']),
-            'camera_matrix': result['camera_matrix'].tolist(),
             'intrinsics': {
+                'camera_matrix': result['camera_matrix'].tolist(),
                 'fx': float(result['camera_matrix'][0, 0]),
                 'fy': float(result['camera_matrix'][1, 1]),
                 'cx': float(result['camera_matrix'][0, 2]),
                 'cy': float(result['camera_matrix'][1, 2])
             },
-            'distortion_coefficients': result['dist_coeffs'].ravel().tolist(),
             'distortion': {
+                'coefficients': result['dist_coeffs'].ravel().tolist(),
                 'k1': float(result['dist_coeffs'][0, 0]),
                 'k2': float(result['dist_coeffs'][0, 1]),
                 'p1': float(result['dist_coeffs'][0, 2]),
                 'p2': float(result['dist_coeffs'][0, 3]),
                 'k3': float(result['dist_coeffs'][0, 4])
             },
-            'per_image_errors': [float(e) for e in errors],
-            'error_statistics': {
-                'mean': float(np.mean(errors)),
-                'std': float(np.std(errors)),
-                'min': float(np.min(errors)),
-                'max': float(np.max(errors))
+            'extrinsics': [
+                {
+                    'image_id': i + 1,
+                    'rotation_vector': result['rvecs'][i].ravel().tolist(),
+                    'rotation_matrix': rotation_matrices[i],
+                    'translation_vector': result['tvecs'][i].ravel().tolist()
+                }
+                for i in range(len(result['rvecs']))
+            ],
+            'reprojection_errors': {
+                'per_image': [float(e) for e in errors],
+                'statistics': {
+                    'mean': float(np.mean(errors)),
+                    'std': float(np.std(errors)),
+                    'min': float(np.min(errors)),
+                    'max': float(np.max(errors))
+                }
             }
         }
-        
         with open(filename, 'w') as f:
             json.dump(results_dict, f, indent=2)
-        
         print(f"\nResults saved to {filename}")
 
 
