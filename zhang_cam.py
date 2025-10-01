@@ -14,8 +14,8 @@ class ZhangCalibration:
         self.images = data['images']
         self.n_images = len(self.images)
 
+    # Hartley normalization for numerical stability
     def normalize_points(self, points):
-        """Hartley normalization"""
         pts = points.reshape(-1, 2)
         centroid = np.mean(pts, axis=0)
         std = np.std(pts)
@@ -27,11 +27,12 @@ class ZhangCalibration:
         pts_norm = (T @ pts_h.T).T
         return pts_norm[:, :2], T
     
+    # homography estimation using DLT with normalization
     def estimate_homography(self, obj_pts, img_pts):
-        """Normalized DLT"""
         img_pts_norm, T_img = self.normalize_points(img_pts)
         obj_pts_norm, T_obj = self.normalize_points(obj_pts[:, :2].reshape(-1, 1, 2))
         
+        # construct matrix A
         A = []
         for i in range(len(obj_pts)):
             X, Y = obj_pts_norm[i]
@@ -41,13 +42,17 @@ class ZhangCalibration:
         
         _, _, Vt = svd(np.array(A))
         H = Vt[-1, :].reshape(3, 3)
+
+        # denormalize
         H = np.linalg.inv(T_img) @ H @ T_obj
         return H / H[2, 2]
     
+    # compute intrinsic matrix K from multiple homographies
     def compute_intrinsics(self):
         self.homographies = [self.estimate_homography(self.object_points[i], self.image_points[i]) 
                             for i in range(self.n_images)]
         
+        # constraint matrix V
         V = []
         for H in self.homographies:
             h = [H[:, i] for i in range(3)]
@@ -63,6 +68,7 @@ class ZhangCalibration:
         b = Vt[-1, :]
         B11, B12, B22, B13, B23, B33 = b
         
+        # intrinsic parameters
         denom = B11*B22 - B12**2
         v0 = (B12*B13 - B11*B23) / denom
         lambda_ = B33 - (B13**2 + v0*(B12*B13 - B11*B23)) / B11
@@ -72,10 +78,11 @@ class ZhangCalibration:
         cy = v0
         
         self.K = np.array([[fx, 0, cx], [0, fy, cy], [0, 0, 1]])
-        print("Intrinsic Matrix:")
+        print("Intrinsic Matrix (K):")
         print(self.K)
         print(f"\nfx={fx:.4f}, fy={fy:.4f}, cx={cx:.4f}, cy={cy:.4f}\n")
 
+    # extract rotation and translation for each image
     def compute_extrinsics(self):
         K_inv = np.linalg.inv(self.K)
         self.rvecs, self.tvecs = [], []
@@ -86,25 +93,23 @@ class ZhangCalibration:
             r1, r2 = lambda_ * K_inv @ h1, lambda_ * K_inv @ h2
             r3 = np.cross(r1, r2)
             t = lambda_ * K_inv @ h3
-            
+            # enforce orthogonality
             R = np.column_stack([r1, r2, r3])
             U, _, Vt = svd(R)
             R = U @ Vt
+            # ensure det(R) = 1
             if np.linalg.det(R) < 0:
                 Vt[-1, :] *= -1
                 R = U @ Vt
+
+            # convert to rotation vector (axis-angle)
+            rvec, _ = cv2.Rodrigues(R)
             
-            theta = np.arccos(np.clip((np.trace(R)-1)/2, -1, 1))
-            if theta > 1e-10:
-                rvec = theta/(2*np.sin(theta)) * np.array([R[2,1]-R[1,2], R[0,2]-R[2,0], R[1,0]-R[0,1]])
-            else:
-                rvec = np.zeros(3)
-            
-            self.rvecs.append(rvec.reshape(3, 1))
+            self.rvecs.append(rvec)
             self.tvecs.append(t.reshape(3, 1))
 
+    # estimate distortion coefficients k1, k2 using linear least squares
     def estimate_distortion(self):
-        """Linear distortion estimation"""
         D, d = [], []
         for i in range(self.n_images):
             rvec_flat = self.rvecs[i].ravel()  # (3,1) → (3,)
@@ -135,8 +140,8 @@ class ZhangCalibration:
         self.dist_coeffs = k
         print(f"Distortion: k1={k[0]:.6f}, k2={k[1]:.6f}\n")
     
+    ## non-linear refinement via Levenberg-Marquardt optimization ##
     def refine_parameters(self):
-        """Nonlinear refinement"""  
         def pack():
             p = [self.K[0,0], self.K[1,1], self.K[0,2], self.K[1,2]]
             p.extend(self.dist_coeffs)
@@ -160,27 +165,32 @@ class ZhangCalibration:
             K, dist, rvs, tvs = unpack(params)
             res = []
             for i in range(self.n_images):
-                theta = np.linalg.norm(rvs[i])
-                if theta > 1e-10:
-                    r = rvs[i] / theta
-                    K_mat = np.array([[0, -r[2], r[1]], [r[2], 0, -r[0]], [-r[1], r[0], 0]])
-                    R = np.eye(3) + np.sin(theta)*K_mat + (1-np.cos(theta))*(K_mat @ K_mat)
-                else:
-                    R = np.eye(3)
-                
-                obj_h = np.column_stack([self.object_points[i], np.ones(len(self.object_points[i]))])
+                # convert to rotation matrix
+                R, _ = cv2.Rodrigues(rvs[i])
+
+                # transform to camera coordinates
+                obj_h = np.column_stack([self.object_points[i], 
+                                         np.ones(len(self.object_points[i]))])
                 p = (np.column_stack([R, tvs[i]]) @ obj_h.T).T
-                x, y = p[:, 0]/p[:, 2], p[:, 1]/p[:, 2]
                 
+                # perspective division
+                x = p[:, 0] / p[:, 2]
+                y = p[:, 1] / p[:, 2]
+                
+                # apply radial distortion
                 r2 = x**2 + y**2
-                x *= (1 + dist[0]*r2 + dist[1]*r2**2)
-                y *= (1 + dist[0]*r2 + dist[1]*r2**2)
+                radial = 1 + dist[0]*r2 + dist[1]*r2**2
+                x *= radial
+                y *= radial
                 
+                # apply intrinsics
                 u = K[0,0]*x + K[0,2]
                 v = K[1,1]*y + K[1,2]
                 
+                # compute residuals
                 obs = self.image_points[i][:, 0, :]
                 res.extend((obs - np.column_stack([u, v])).ravel())
+            
             return np.array(res)
         
         result = least_squares(residuals, pack(), method='lm', verbose=0)
@@ -188,9 +198,12 @@ class ZhangCalibration:
         self.rvecs = [r.reshape(3, 1) for r in self.rvecs]
         self.tvecs = [t.reshape(3, 1) for t in self.tvecs]
         
-        print("Refined Intrinsics:")
+        print("\nRefined Intrinsic Matrix (K):")
         print(self.K)
-        print(f"\nk1={self.dist_coeffs[0]:.6f}, k2={self.dist_coeffs[1]:.6f}\n")
+        print(f"fx={self.K[0,0]:.4f}, fy={self.K[1,1]:.4f}, "
+              f"cx={self.K[0,2]:.4f}, cy={self.K[1,2]:.4f}")
+        print(f"\nRefined distortion: k1={self.dist_coeffs[0]:.6f}, "
+              f"k2={self.dist_coeffs[1]:.6f}")
 
 
     def calibrate(self):
@@ -198,8 +211,11 @@ class ZhangCalibration:
         self.compute_extrinsics()
         self.estimate_distortion()
         self.refine_parameters()
+
+        dist_opencv = np.zeros((5, 1), dtype=np.float64)
+        dist_opencv[0, 0] = self.dist_coeffs[0]
+        dist_opencv[1, 0] = self.dist_coeffs[1]
         
-        dist_opencv = np.array([[self.dist_coeffs[0], self.dist_coeffs[1], 0, 0, 0]])
         return {
             'camera_matrix': self.K,
             'dist_coeffs': dist_opencv,
@@ -217,41 +233,121 @@ class ZhangCalibration:
             errors.append(error)
             print(f"Image {i:03d}: {error:.4f} pixels")
         
-        print(f"\nMean: {np.mean(errors):.4f} | Std: {np.std(errors):.4f}")
-        print(f"Max: {np.max(errors):.4f} | Min: {np.min(errors):.4f}\n")
+        print(f"\nMean: {np.mean(errors):.6f} px | Std: {np.std(errors):.6f} px")
+        print(f"Min:  {np.min(errors):.6f} px | Max: {np.max(errors):.6f} px")
         return errors
     
+    ## save visualization results ##
+    def visualize_reprojection(self, result, output_dir="results/reprojection/zhang"):
+        os.makedirs(output_dir, exist_ok=True)
+        
+        for i in range(len(self.images)):
+            img = self.images[i].copy()
+            
+            imgpoints2, _ = cv2.projectPoints(
+                self.object_points[i], result['rvecs'][i], result['tvecs'][i],
+                result['camera_matrix'], result['dist_coeffs']
+            )
+            
+            error = cv2.norm(self.image_points[i], imgpoints2, cv2.NORM_L2) / len(imgpoints2)
+            
+            for point in self.image_points[i]:
+                cv2.circle(img, tuple(point.ravel().astype(int)), 5, (0, 0, 255), -1)
+            
+            for point in imgpoints2:
+                cv2.circle(img, tuple(point.ravel().astype(int)), 3, (0, 255, 0), -1)
+
+            cv2.rectangle(img, (5, 5), (550, 140), (0, 0, 0), -1)
+            cv2.putText(img, "Red: Detected", (15, 45), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 0, 255), 3)
+            cv2.putText(img, "Green: Reprojected", (15, 90), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 255, 0), 3)
+            cv2.putText(img, f"Error: {error:.4f} px", (15, 130),
+                       cv2.FONT_HERSHEY_SIMPLEX, 1.2, (255, 255, 255), 3)
+            
+            cv2.imwrite(os.path.join(output_dir, f"reproj_{i+1:03d}.jpg"), img)
+        
+        print(f"Saved {len(self.images)} reprojection images")
+    
+    def undistort_images(self, result, output_dir="results/undistorted/zhang"):
+        os.makedirs(output_dir, exist_ok=True)
+        
+        newcameramtx, roi = cv2.getOptimalNewCameraMatrix(
+            result['camera_matrix'], result['dist_coeffs'],
+            self.image_size, 1, self.image_size
+        )
+        
+        for i, img in enumerate(self.images):
+            dst = cv2.undistort(img, result['camera_matrix'], 
+                               result['dist_coeffs'], None, newcameramtx)
+            comparison = np.hstack([img, dst])
+            h, w = img.shape[:2]
+            
+            cv2.rectangle(comparison, (5, 5), (450, 70), (0, 0, 0), -1)
+            cv2.rectangle(comparison, (w + 5, 5), (w + 350, 70), (0, 0, 0), -1)
+            
+            cv2.putText(comparison, "Original (Distorted)", (15, 50),
+                       cv2.FONT_HERSHEY_SIMPLEX, 1.2, (255, 255, 255), 3)
+            cv2.putText(comparison, "Undistorted", (w + 15, 50),
+                       cv2.FONT_HERSHEY_SIMPLEX, 1.2, (255, 255, 255), 3)
+            
+            cv2.imwrite(os.path.join(output_dir, f"undist_{i+1:03d}.jpg"), comparison)
+        
+        print(f"Saved {len(self.images)} undistorted images")
+    
+    ## save numerical results to json ##
     def save_results(self, result, errors, filename="results/zhang_calibration.json"):
         os.makedirs(os.path.dirname(filename), exist_ok=True)
         
+        dist_flat = result['dist_coeffs'].ravel()
+        rotation_matrices = []
+        for rvec in result['rvecs']:
+            rmat, _ = cv2.Rodrigues(rvec)
+            rotation_matrices.append(rmat.tolist())
+        
         data = {
-            'method': "Zhang's Method",
+            'method': "Zhang's Method (Custom Implementation)",
             'num_images': self.n_images,
-            'image_size': {'width': self.image_size[0], 'height': self.image_size[1]},
-            'camera_matrix': result['camera_matrix'].tolist(),
+            'image_size': {
+                'width': self.image_size[0], 
+                'height': self.image_size[1]
+            },
             'intrinsics': {
+                'camera_matrix': result['camera_matrix'].tolist(),
                 'fx': float(result['camera_matrix'][0, 0]),
                 'fy': float(result['camera_matrix'][1, 1]),
                 'cx': float(result['camera_matrix'][0, 2]),
                 'cy': float(result['camera_matrix'][1, 2])
             },
-            'distortion_coefficients': result['dist_coeffs'].ravel().tolist(),
             'distortion': {
-                'k1': float(result['dist_coeffs'][0, 0]),
-                'k2': float(result['dist_coeffs'][0, 1])
+                'coefficients': dist_flat.tolist(),
+                'k1': float(dist_flat[0]),
+                'k2': float(dist_flat[1])
             },
-            'per_image_errors': [float(e) for e in errors],
-            'error_statistics': {
-                'mean': float(np.mean(errors)),
-                'std': float(np.std(errors)),
-                'min': float(np.min(errors)),
-                'max': float(np.max(errors))
+            'extrinsics': [
+                {
+                    'image_id': i + 1,
+                    'rotation_vector': result['rvecs'][i].ravel().tolist(),
+                    'rotation_matrix': rotation_matrices[i],
+                    'translation_vector': result['tvecs'][i].ravel().tolist()
+                }
+                for i in range(len(result['rvecs']))
+            ],
+            'reprojection_errors': {
+                'per_image': [float(e) for e in errors],
+                'statistics': {
+                    'mean': float(np.mean(errors)),
+                    'std': float(np.std(errors)),
+                    'min': float(np.min(errors)),
+                    'max': float(np.max(errors))
+                }
             }
         }
         
         with open(filename, 'w') as f:
             json.dump(data, f, indent=2)
-        print(f"Results saved to {filename}\n")
+        
+        print(f"\nResults saved to {filename}")
 
 
 if __name__ == "__main__":
@@ -261,6 +357,8 @@ if __name__ == "__main__":
     calibrator = ZhangCalibration(data)
     result = calibrator.calibrate()
     errors = calibrator.compute_reprojection_error(result)
+    calibrator.visualize_reprojection(result)
+    calibrator.undistort_images(result)
     calibrator.save_results(result, errors)
     
     
