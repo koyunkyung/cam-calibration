@@ -66,7 +66,7 @@ JSON files contain:
 ## Project Structure
 ```
 ├── data/
-│   ├── raw_img/                    # Images of the checkerboard
+│   ├── raw_img/                    
 │   └── loader.py                   # Corner detection and preprocessing
 ├── zhang_cam.py                    # Zhang's method implementation
 ├── opencv_cam.py                   # OpenCV calibration comparison
