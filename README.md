@@ -1,5 +1,4 @@
 # Camera Calibration with Zhang's Method
-## Implementation and Comparative Analysis
 
 Modern computer vision applications require understanding the geometric relationship between 3D world coordinates and 2D image pixels. Camera calibration determines the projection parameters through intrinsic matrix **K** and extrinsic parameters **[R|T]**. While Tsai's method requires precise 3D calibration objects, Zhang's method simplifies this by using planar patterns like checkerboards captured from multiple viewpoints.
 
