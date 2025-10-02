@@ -46,23 +46,6 @@ Calibration using OpenCV's built-in function for comparison.
 
 ---
 
-## Results
-
-### Calibration Parameters
-JSON files contain:
-- Camera intrinsic matrix
-- Distortion coefficients
-- Rotation and translation vectors per image
-- RMS reprojection error
-- Summary statistics (mean, min, max, std) of reprojection errors
-
-### Visual Validation
-- **Reprojection visualization:** Red dots (detected corners) vs Green dots (reprojected points)
-- **Undistorted images:** Distortion correction quality assessment
-- **Zhang's three stages:** Calibration improvement tracking across stages
-
----
-
 ## Project Structure
 ```
 ├── data/
