@@ -1,5 +1,11 @@
-# Camera Calibration with Zhang's Method: Implementation and Comparative Analysis
-This repository implements camera calibration using Zhang's method and compares it with OpenCV's built-in calibration.
+# Camera Calibration with Zhang's Method
+## Implementation and Comparative Analysis
+
+Modern computer vision applications require understanding the geometric relationship between 3D world coordinates and 2D image pixels. Camera calibration determines the projection parameters through intrinsic matrix **K** and extrinsic parameters **[R|T]**. While Tsai's method requires precise 3D calibration objects, Zhang's method simplifies this by using planar patterns like checkerboards captured from multiple viewpoints.
+
+This work implements Zhang's method from scratch and compares it with OpenCV's built-in calibration. The implementation includes homography estimation, parameter initialization, and non-linear refinement. Both methods are evaluated through reprojection errors and undistortion quality.
+
+---
 
 ## Execution Flow
 
@@ -9,7 +15,7 @@ python data/loader.py
 ```
 Detects chessboard corners from calibration images.
 
-**Output:** `results/corner_detection/` - Visualize corner detection for all images
+**Output:** `results/corner_detection/` - Visualized corner detection results
 
 ### Step 2: Zhang's Calibration
 ```bash
@@ -17,15 +23,15 @@ python zhang_cam.py
 ```
 Three-stage calibration process:
 1. Initial linear estimation (DLT)
-2. Initial distortion parameter estimation in order to enhance refinement quality
+2. Distortion parameter estimation for enhanced refinement
 3. Non-linear refinement (Levenberg-Marquardt)
 
 **Outputs:**
-- `results/zhang_calibration.json` - Calibration parameters and quantitative summary of reprojection errors for all images
-- `results/reprojection/zhang/stage1_linear/` - Visualize stage 1 reprojection errors
-- `results/reprojection/zhang/stage2_distortion/` - Visualize stage 2 reprojection errors
-- `results/reprojection/zhang/stage3_refined/` - Visualize stage 3 reprojection errors
-- `results/undistorted/zhang/` - Undistorted images (based on final distortion parameters from stage 3)
+- `results/zhang_calibration.json` - Calibration parameters and reprojection error statistics
+- `results/reprojection/zhang/stage1_linear/` - Stage 1 reprojection visualization
+- `results/reprojection/zhang/stage2_distortion/` - Stage 2 reprojection visualization
+- `results/reprojection/zhang/stage3_refined/` - Stage 3 reprojection visualization
+- `results/undistorted/zhang/` - Undistorted images (final parameters from stage 3)
 
 ### Step 3: OpenCV Calibration
 ```bash
@@ -34,9 +40,11 @@ python opencv_cam.py
 Calibration using OpenCV's built-in function for comparison.
 
 **Outputs:**
-- `results/opencv_calibration.json` - Calibration parameters and quantitative summary of reprojection errors for all images
-- `results/reprojection/opencv/` - Visualize reprojection errors
+- `results/opencv_calibration.json` - Calibration parameters and reprojection error statistics
+- `results/reprojection/opencv/` - Reprojection visualization
 - `results/undistorted/opencv/` - Undistorted images
+
+---
 
 ## Results
 
@@ -44,31 +52,34 @@ Calibration using OpenCV's built-in function for comparison.
 JSON files contain:
 - Camera intrinsic matrix
 - Distortion coefficients
-- Rotation and translation vectors
+- Rotation and translation vectors per image
 - RMS reprojection error
-- Summary statistics(mean, min, max, std.) of reprojection errors for all images
+- Summary statistics (mean, min, max, std) of reprojection errors
 
 ### Visual Validation
-- **Reprojection images:** Red dots (detected) vs Green dots (reprojected)
-- **Undistorted images:** Verify distortion correction quality
-- **Zhang's stages:** Track calibration improvement across three stages
+- **Reprojection visualization:** Red dots (detected corners) vs Green dots (reprojected points)
+- **Undistorted images:** Distortion correction quality assessment
+- **Zhang's three stages:** Calibration improvement tracking across stages
 
+---
 
 ## Project Structure
+```
 ├── data/
-│   └── loader.py              # Corner detection and data preprocessing
-├── zhang_cam.py               # Zhang's calibration implementation
-├── opencv_cam.py              # OpenCV calibration for comparison
+│   └── loader.py                   # Corner detection and preprocessing
+├── zhang_cam.py                    # Zhang's method implementation
+├── opencv_cam.py                   # OpenCV calibration comparison
 └── results/
-    ├── corner_detection/      # Detected corners visualization
-    ├── zhang_calibration.json # Zhang's calibration results
-    ├── opencv_calibration.json# OpenCV calibration results
+    ├── corner_detection/           # Corner detection visualization
+    ├── zhang_calibration.json      # Zhang's calibration results
+    ├── opencv_calibration.json     # OpenCV calibration results
     ├── reprojection/
     │   ├── zhang/
-    │   │   ├── stage1_linear/      # Initial DLT estimation
-    │   │   ├── stage2_distortion/  # Distortion parameter estimation
-    │   │   └── stage3_refined/     # Non-linear refinement (LM)
-    │   └── opencv/                 # OpenCV reprojection errors
+    │   │   ├── stage1_linear/      # DLT estimation results
+    │   │   ├── stage2_distortion/  # Distortion estimation results
+    │   │   └── stage3_refined/     # LM refinement results
+    │   └── opencv/                 # OpenCV reprojection results
     └── undistorted/
-        ├── zhang/             # Images undistorted by Zhang's method
-        └── opencv/            # Images undistorted by OpenCV
+        ├── zhang/                  # Zhang's undistorted images
+        └── opencv/                 # OpenCV undistorted images
+```
