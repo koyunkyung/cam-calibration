@@ -49,19 +49,19 @@ Calibration using OpenCV's built-in function for comparison.
 ```
 ├── data/
 │   ├── raw_img/                    
-│   └── loader.py                   # Corner detection and preprocessing
+│   └── loader.py                   # Corner detection and data preprocessing
 ├── zhang_cam.py                    # Zhang's method implementation
-├── opencv_cam.py                   # OpenCV calibration comparison
+├── opencv_cam.py                   # OpenCV calibration implementation
 └── results/
     ├── corner_detection/           # Corner detection visualization
-    ├── zhang_calibration.json      # Zhang's calibration results
-    ├── opencv_calibration.json     # OpenCV calibration results
+    ├── zhang_calibration.json      # Zhang's calibration quantitative results
+    ├── opencv_calibration.json     # OpenCV calibration quantitative results
     ├── reprojection/
-    │   ├── zhang/
-    │   │   ├── stage1_linear/      # DLT estimation results
-    │   │   ├── stage2_distortion/  # Distortion estimation results
-    │   │   └── stage3_refined/     # LM refinement results
-    │   └── opencv/                 # OpenCV reprojection results
+    │   ├── zhang/                  # Zhang's reprojection visualization
+    │   │   ├── stage1_linear/      
+    │   │   ├── stage2_distortion/  
+    │   │   └── stage3_refined/     
+    │   └── opencv/                 # OpenCV reprojection visualization
     └── undistorted/
         ├── zhang/                  # Zhang's undistorted images
         └── opencv/                 # OpenCV undistorted images
